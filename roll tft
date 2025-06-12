@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trình Mô Phỏng Roll Tướng</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #e5e7eb;
+            -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+        }
+        .champion-card {
+            background: linear-gradient(180deg, rgba(41,51,65,1) 0%, rgba(22,27,34,1) 100%);
+            border-width: 2px;
+            cursor: grab;
+            aspect-ratio: 5/7;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3), inset 0 0 10px rgba(0,0,0,0.4);
+            overflow: hidden;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            transition: all 0.2s ease-in-out;
+        }
+        .champion-card:active {
+            cursor: grabbing;
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
+            z-index: 50;
+        }
+        .champion-art { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding-bottom: 2rem; }
+        .champion-info-bar { position: relative; padding: 0.25rem 0.5rem; z-index: 2; width: 100%; }
+        .champion-stars { position: absolute; top: 4px; left: 4px; z-index: 5; text-shadow: 0 0 3px black; }
+        .champion-stats { position: absolute; bottom: 40px; left: 0; right: 0; padding: 0 0.5rem; display: flex; justify-content: space-between; font-size: 0.75rem; color: white; text-shadow: 1px 1px 2px black; z-index: 4; }
+        .champion-traits-list { position: absolute; top: 30px; left: 4px; z-index: 4; display: flex; flex-direction: column; gap: 4px; }
+        .board-slot, .bench-slot, .shop-slot { min-height: 110px; border: 2px dashed #374151; background-color: rgba(31, 41, 55, 0.5); position: relative; }
+        .shop-slot { min-height: 130px; }
+        .control-panel { background-color: #161b22; border-top: 2px solid #30363d; }
+        .star-1 { border-color: #6b7280; } .star-2 { border-color: #22c55e; } .star-3 { border-color: #3b82f6; } .star-4 { border-color: #8b5cf6; } .star-5 { border-color: #f97316; } .star-6 { border-color: #ef4444; } .star-7 { border-color: #06b6d4; } .star-8 { border-color: #d946ef; } .star-9 { border-color: #facc15; }
+        .star-10, .star-11, .star-12, .star-13 { border-image: linear-gradient(45deg, #f97316, #ef4444, #d946ef, #3b82f6) 1; }
+        .cost-bar-1 { background-color: #6b7280; } .cost-bar-2 { background-color: #16a34a; } .cost-bar-3 { background-color: #2563eb; } .cost-bar-4 { background-color: #9333ea; } .cost-bar-5 { background: linear-gradient(45deg, #fcd34d, #fbbf24, #f59e0b); }
+        .cost-bar-6 { background-image: linear-gradient(to right, #4facfe 0%, #00f2fe 100%); }
+        .xp-bar-bg { background-color: #374151; } .xp-bar-fill { background-color: #3b82f6; transition: width 0.3s ease; }
+        .modal-backdrop { z-index: 999; }
+        .modal-content { z-index: 1000; }
+        #event-notification { transition: opacity 0.5s ease-in-out, transform 0.5s ease-in-out; z-index: 2000; }
+        #sell-area { border: 2px dashed #4b5563; transition: all 0.2s ease; }
+        #sell-area.drag-over-sell { border-color: #ef4444; background-color: rgba(239, 68, 68, 0.2); transform: scale(1.05); }
+        .dragging-ghost { position: fixed; pointer-events: none; z-index: 1000; opacity: 0.8; }
+        .cost-text-1 { color: #9ca3af; } .cost-text-2 { color: #4ade80; } .cost-text-3 { color: #60a5fa; } .cost-text-4 { color: #c084fc; } .cost-text-5 { color: #fbbf24; } .cost-text-6 { color: #67e8f9; }
+    </style>
+</head>
+<body class="p-2 md:p-4">
+    <div class="flex-grow grid grid-cols-12 gap-4">
+        <!-- Trait Tracker -->
+        <div class="col-span-2 order-first">
+            <div id="trait-tracker" class="bg-gray-900 bg-opacity-50 p-2 rounded-lg space-y-2 h-full overflow-y-auto"></div>
+        </div>
+        
+        <!-- Main Content: Board and Bench -->
+        <div class="col-span-10 order-last space-y-4 flex flex-col">
+            <div class="flex justify-between items-center">
+                 <h2 class="text-xl font-semibold text-white opacity-80">
+                    Sân Đấu <span id="board-unit-count" class="text-gray-400"></span> - Lực chiến: <span id="combat-power-display" class="text-yellow-400">0</span>
+                </h2>
+                 <div class="flex items-center space-x-2">
+                    <button id="help-button" title="Hướng dẫn" class="p-2 rounded-full hover:bg-gray-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    </button>
+                    <button id="settings-button" title="Cài đặt" class="p-2 rounded-full hover:bg-gray-700">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06-.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"></path></svg>
+                     </button>
+                 </div>
+            </div>
+            <div id="board" class="grid grid-cols-7 gap-2"></div>
+            <div class="flex items-center justify-between mt-auto">
+                <h2 class="text-xl font-semibold text-white opacity-80">Hàng Chờ</h2>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center font-bold text-lg text-red-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="mr-2"><path d="M12 4.248c-3.148-5.402-12-3.825-12 2.942 0 4.661 5.571 9.427 12 15.81 6.43-6.383 12-11.149 12-15.81 0-6.792-8.875-8.306-12-2.942z"/></svg>
+                        <span id="player-hp-display">100</span>
+                    </div>
+                    <button id="start-battle-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition-colors">Chiến đấu</button>
+                </div>
+            </div>
+            <div id="bench" class="grid grid-cols-9 gap-2"></div>
+        </div>
+    </div>
+
+    <!-- Bottom Control Panel -->
+    <footer class="control-panel p-3 rounded-lg mt-4">
+        <div class="max-w-7xl mx-auto grid grid-cols-12 gap-4 items-end">
+            <div class="col-span-3 flex flex-col items-center space-y-2">
+                <div class="text-center w-full">
+                    <div class="text-lg font-bold">Cấp <span id="level-display">1</span></div>
+                    <div class="w-full bg-gray-700 rounded-full h-2.5 xp-bar-bg"><div id="xp-bar" class="xp-bar-fill h-2.5 rounded-full" style="width: 0%"></div></div>
+                    <div class="text-sm text-gray-400 mt-1"><span id="xp-display">0 / 2</span> XP</div>
+                </div>
+                 <button id="buy-xp-button" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded w-full transition-colors">Mua XP (F) - 4💰</button>
+                 <button id="roll-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded w-full transition-colors">Làm Mới (D) - 2💰</button>
+            </div>
+            <div class="col-span-8">
+                 <div class="flex items-center justify-center mb-2"><span class="text-yellow-400 text-xl font-bold" id="gold-display">100</span><span class="text-yellow-400 text-xl">💰</span></div>
+                 <div id="shop-odds" class="text-xs text-gray-400 mb-2 w-full"></div>
+                 <div id="shop" class="grid grid-cols-5 gap-2"></div>
+            </div>
+            <div class="col-span-1 flex items-center justify-center">
+                <div id="sell-area" class="w-20 h-20 rounded-lg flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500 pointer-events-none"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Modals -->
+    <div id="battle-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center modal-backdrop">
+        <div class="bg-gray-800 rounded-lg p-8 shadow-xl modal-content text-center w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Vòng <span id="round-number-display">1</span></h2>
+            <div class="mb-6 space-y-2">
+                <p>Lực chiến địch: <strong id="enemy-power-display" class="text-red-500 text-xl">20,000</strong></p>
+                <p>Tỷ lệ thắng: <strong id="win-rate-display" class="text-green-500 text-xl">50%</strong></p>
+            </div>
+            <button id="confirm-battle-button" class="bg-red-700 hover:bg-red-800 text-white font-bold py-3 px-8 rounded-lg text-lg">CHIẾN!</button>
+            <button id="close-battle-modal-button" class="mt-4 text-gray-400 hover:text-white">Đóng</button>
+        </div>
+    </div>
+    <div id="battle-result-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center modal-backdrop">
+        <div class="bg-gray-800 rounded-lg p-8 shadow-xl modal-content text-center w-full max-w-md">
+            <h2 id="battle-result-title" class="text-4xl font-bold mb-4"></h2>
+            <p id="battle-result-message" class="mb-6 text-lg"></p>
+            <button id="continue-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg">Tiếp tục</button>
+        </div>
+    </div>
+    <div id="game-over-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center modal-backdrop">
+        <div class="bg-gray-800 rounded-lg p-8 shadow-xl modal-content text-center">
+            <h2 class="text-4xl font-bold mb-4 text-red-500">GAME OVER</h2>
+            <p class="mb-6">Bạn đã bị đánh bại ở vòng <span id="final-round-display"></span>.</p>
+            <button id="restart-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg">Chơi Lại</button>
+        </div>
+    </div>
+    <div id="trait-info-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center modal-backdrop">
+        <div id="trait-info-content" class="bg-gray-800 border-2 border-gray-600 rounded-lg p-6 shadow-xl modal-content w-full max-w-lg"></div>
+    </div>
+    <div id="event-notification" class="hidden fixed top-5 right-5 bg-red-800 border-2 border-red-500 text-white p-4 rounded-lg shadow-lg opacity-0 transform -translate-y-10">
+        <p id="event-message"></p>
+    </div>
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center modal-backdrop">
+        <div class="bg-gray-800 rounded-lg p-8 shadow-xl modal-content text-center w-full max-w-sm">
+             <h2 class="text-2xl font-bold mb-6">Cài Đặt</h2>
+             <div class="mb-4 text-left">
+                <label for="volume-slider" class="block mb-2">Âm lượng:</label>
+                <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" class="w-full">
+             </div>
+             <button id="close-settings-button" class="mt-4 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded w-full">Đóng</button>
+        </div>
+    </div>
+    <div id="help-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center modal-backdrop">
+        <div class="bg-gray-800 rounded-lg p-8 shadow-xl modal-content text-center w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <h2 class="text-3xl font-bold mb-4">Hướng Dẫn Chơi Game</h2>
+            <div class="text-left space-y-4">
+                <p>Chào mừng bạn đến với Trình Mô Phỏng Roll Tướng! Mục tiêu của bạn là xây dựng đội hình mạnh nhất, vượt qua các vòng đấu và sống sót lâu nhất có thể.</p>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2 text-amber-400">Các Cơ Chế Chính:</h3>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li><strong>Mua Tướng:</strong> Sử dụng vàng để mua tướng từ cửa hàng. Bạn có thể nhấn vào tướng hoặc dùng phím số (1-5).</li>
+                        <li><strong>Nâng Cấp Sao:</strong> Kết hợp 3 tướng 1 sao giống nhau để tạo ra tướng 2 sao. Tương tự, 3 tướng 2 sao sẽ tạo ra tướng 3 sao, v.v. Tướng cấp sao cao hơn sẽ có chỉ số vượt trội.</li>
+                        <li><strong>Sân Đấu & Hàng Chờ:</strong> Kéo thả tướng giữa hàng chờ và sân đấu để sắp xếp đội hình. Số lượng tướng trên sân bị giới hạn bởi cấp độ của bạn.</li>
+                        <li><strong>Bán Tướng:</strong> Kéo tướng vào biểu tượng thùng rác ở góc dưới bên phải hoặc di chuột qua tướng và nhấn phím 'E' để bán và nhận lại vàng.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2 text-amber-400">Tăng Cấp & Kinh Nghiệm (XP):</h3>
+                     <ul class="list-disc list-inside space-y-1">
+                        <li><strong>Lên Cấp:</strong> Cấp độ quyết định số lượng tướng bạn có thể đặt trên sân và tỷ lệ ra tướng hiếm trong cửa hàng.</li>
+                        <li><strong>Mua XP:</strong> Nhấn nút "Mua XP" hoặc phím 'F' để dùng 4 vàng đổi lấy 4 XP.</li>
+                        <li><strong>XP Tự Động:</strong> Sau mỗi vòng đấu, bạn sẽ nhận được 2 XP.</li>
+                        <li><strong>Mở khóa Cấp Độ Cao:</strong> Đạt được các mốc sức mạnh đặc biệt (ví dụ: tướng 5 vàng 3 sao) sẽ mở khóa giới hạn cấp độ cao hơn (11, 12, 13).</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-xl font-semibold mb-2 text-amber-400">Chiến Đấu & Tộc Hệ:</h3>
+                     <ul class="list-disc list-inside space-y-1">
+                        <li><strong>Chiến Đấu:</strong> Nhấn nút "Chiến đấu" để đối đầu với kẻ địch. Tỷ lệ thắng được tính dựa trên Lực chiến của bạn và đối thủ.</li>
+                        <li><strong>Lực Chiến:</strong> Được tính dựa trên tổng chỉ số (Máu, Sát thương) và các mốc Tộc/Hệ bạn đã kích hoạt trên sân.</li>
+                        <li><strong>Tộc/Hệ:</strong> Mỗi tướng thuộc về các Tộc/Hệ khác nhau. Kích hoạt đủ số lượng tướng khác nhau của một Tộc/Hệ sẽ mang lại những hiệu ứng đặc biệt. Hãy nhấn vào biểu tượng Tộc/Hệ ở bên trái để xem chi tiết.</li>
+                        <li><strong>Phần Thưởng & Hình Phạt:</strong> Thắng trận sẽ cho bạn vàng và kẻ địch tiếp theo sẽ mạnh hơn. Thua trận sẽ khiến bạn bị trừ Máu Linh Thú.</li>
+                    </ul>
+                </div>
+                 <div>
+                    <h3 class="text-xl font-semibold mb-2 text-amber-400">Các Phím Tắt:</h3>
+                     <ul class="list-disc list-inside space-y-1">
+                        <li><strong>D:</strong> Làm mới cửa hàng (Roll).</li>
+                        <li><strong>F:</strong> Mua kinh nghiệm (XP).</li>
+                        <li><strong>E:</strong> Bán tướng (khi di chuột qua).</li>
+                        <li><strong>I:</strong> Tự động xếp tướng từ hàng chờ lên sân đấu.</li>
+                        <li><strong>1, 2, 3, 4, 5:</strong> Mua tướng ở các vị trí tương ứng trong cửa hàng.</li>
+                    </ul>
+                </div>
+            </div>
+            <button id="close-help-modal-button" class="mt-6 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded w-full">Đã hiểu</button>
+        </div>
+    </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // --- SOUND SETUP ---
+        const synth = new Tone.PolySynth(Tone.Synth).toDestination();
+        const metalSynth = new Tone.MetalSynth({ frequency: 50, envelope: { attack: 0.001, decay: 0.1, release: 0.01 }, harmonicity: 3.1, modulationIndex: 16, resonance: 4000, octaves: 1.5 }).toDestination();
+        function playBuySound() { try { if (window.Tone) metalSynth.triggerAttackRelease("C2", "8n", Tone.now()); } catch(e){} }
+        function playRollSound() { try { if (window.Tone) { synth.releaseAll(); const n=Tone.now(); synth.triggerAttackRelease(["C5","E5","G5"], "16n", n); } } catch(e){} }
+        function playUpgradeSound() { try { if (window.Tone) { synth.releaseAll(); const n=Tone.now(); synth.triggerAttackRelease(["C4", "G4", "C5"], "8n", n); } } catch(e){} }
+
+        // --- GAME DATA ---
+        const traitData = { "Thần Giáp":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-300"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>`,thresholds:[2,3,5,7], description: "Thần Giáp tăng cường khả năng chiến thắng của bạn.", effects: { 3: "Tăng 3% tỷ lệ thắng.", 5: "Tăng 10% tỷ lệ thắng.", 7: "Tăng 17% tỷ lệ thắng."}}, "Chiến Binh":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-red-400"><path d="M18 8l-4 4h6v4h-6l4 4"></path><path d="M6 8l4 4H4v4h6l-4 4"></path></svg>`,thresholds:[2,3,5,7], description: "Các Chiến Binh nhận thêm Lực Chiến.", effects: { 3: "+20,000 Lực Chiến.", 5: "+250,000 Lực Chiến.", 7: "+1,000,000 Lực Chiến."}}, "Thần Tài":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-purple-400"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 00-10 10c0 4.42 2.86 8.17 6.84 9.5"></path></svg>`,thresholds:[2,3,4,5], description: "Sau mỗi vòng THUA, có 50% tỷ lệ nhận thêm Vàng.", effects: { 3: "Nhận 5 Vàng.", 4: "Nhận 10 Vàng.", 5: "Nhận 20 Vàng."}}, "Hắc Ám":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path></svg>`,thresholds:[2,3,4,5], description: "Sau mỗi vòng đấu, có 20% tỷ lệ hồi Máu Linh Thú.", effects: { 3: "Hồi 3 Máu.", 4: "Hồi 5 Máu.", 5: "Hồi 15 Máu."}}, "Thiên Tử":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-yellow-300"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path><path d="M12 22V12"></path></svg>`,thresholds:[3,4,5,7], description: "Sau khi thắng, có tỷ lệ nhận 1 trong 3 hiệu ứng.", effects: { 3: "(4%) 2 XP, (4%) 1 tướng 3 vàng, (2%) +10% Sát thương.", 4: "(4%) 6 XP, (4%) 1 tướng 4 vàng, (2%) +20% Sát thương.", 5: "(4%) 15 XP, (4%) 1 tướng 5 vàng, (2%) +40% Sát thương.", 7: "(2%) 20 XP, (5%) 3 tướng 5 vàng, (5%) +50% Sát thương."}}, "Thời Không":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-cyan-400"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,thresholds:[3,4,5], description: "Sau mỗi vòng đấu, có 15% tỷ lệ nhận 1 tướng Thời Không ngẫu nhiên.", effects: { 3: "Nhận tướng 3 vàng.", 4: "Nhận tướng 4 vàng.", 5: "Nhận tướng 5 vàng."}},
+            "Đấng Sáng Thế":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="text-white"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/><circle cx="12" cy="12" r="5"/></svg>`, description: "Chỉ có 1. Triệu hồi một Tinh linh gây sát thương chuẩn."},
+            "Kẻ Hủy Diệt":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="text-red-700"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>`, description: "Chỉ có 1. Đòn đánh có tỷ lệ kết liễu kẻ địch dưới 25% máu."},
+            "Vệ Binh Tinh Tú":{icon:`<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="text-pink-400"><path d="M12 2l2.35 7.18h7.65l-6.18 4.48 2.35 7.18-6.17-4.48-6.17 4.48 2.35-7.18-6.18-4.48h7.65z"/></svg>`, description: "Chỉ có 1. Nhận một lá chắn khổng lồ khi bắt đầu giao tranh."}
+        };
+        const championsData = [ {id:1,name:"Garen",cost:1,hp:500,ad:30,traits:["Thần Giáp"]},{id:2,name:"Darius",cost:1,hp:480,ad:32,traits:["Chiến Binh"]},{id:3,name:"Kayle",cost:1,hp:400,ad:40,traits:["Thiên Tử"]},{id:4,name:"Poppy",cost:1,hp:550,ad:28,traits:["Hắc Ám"]},{id:19,name:"Sylas",cost:1,hp:540,ad:35,traits:["Thần Tài"]},{id:5,name:"Ashe",cost:2,hp:500,ad:50,traits:["Thần Giáp"]},{id:6,name:"Jinx",cost:2,hp:500,ad:44,traits:["Chiến Binh"]},{id:7,name:"Yasuo",cost:2,hp:550,ad:40,traits:["Thần Tài"]},{id:8,name:"Annie",cost:2,hp:500,ad:50,traits:["Hắc Ám"]},{id:9,name:"Katarina",cost:3,hp:650,ad:60,traits:["Thần Giáp"]},{id:10,name:"Riven",cost:3,hp:650,ad:60,traits:["Chiến Binh"]},{id:11,name:"Vi",cost:3,hp:700,ad:45,traits:["Thần Tài"]},{id:12,name:"Lux",cost:3,hp:600,ad:70,traits:["Hắc Ám"]},{id:13,name:"Irelia",cost:4,hp:900,ad:80,traits:["Thần Giáp"]},{id:14,name:"Aatrox",cost:4,hp:950,ad:78,traits:["Chiến Binh"]},{id:15,name:"Jhin",cost:4,hp:744,ad:94,traits:["Thần Tài"]},{id:21,name:"Zed",cost:4,hp:850,ad:85,traits:["Hắc Ám"]},{id:22,name:"Fiora",cost:4,hp:800,ad:75,traits:["Chiến Binh"]},{id:23,name:"Syndra",cost:4,hp:750,ad:50,traits:["Thiên Tử"]},{id:24,name:"Sejuani",cost:4,hp:1000,ad:70,traits:["Thần Giáp"]},{id:27,name:"Heimerdinger",cost:4,hp:780,ad:55,traits:["Thần Tài"]},{id:17,name:"Sett",cost:5,hp:1100,ad:98,traits:["Thần Giáp"]},{id:18,name:"Kaisa",cost:5,hp:800,ad:115,traits:["Chiến Binh"]},{id:20,name:"Ryze",cost:5,hp:800,ad:120,traits:["Hắc Ám"]},{id:26,name:"Yone",cost:5,hp:950,ad:80,traits:["Chiến Binh"]},{id:28,name:"Leona",cost:5,hp:1200,ad:60,traits:["Thần Giáp"]},
+            {id:29,name:"Jarvan IV",cost:1,hp:490,ad:35,traits:["Thiên Tử"]},{id:30,name:"Xin Zhao",cost:2,hp:580,ad:48,traits:["Thiên Tử"]},{id:31,name:"Azir",cost:3,hp:680,ad:65,traits:["Thiên Tử"]},{id:32,name:"Swain",cost:4,hp:920,ad:82,traits:["Thiên Tử"]},{id:33,name:"Aurelion Sol",cost:5,hp:1150,ad:100,traits:["Thiên Tử"]},
+            {id:34,name:"Zilean",cost:1,hp:520,ad:30,traits:["Thời Không"]},{id:35,name:"Ekko",cost:2,hp:560,ad:45,traits:["Thời Không"]},{id:36,name:"Lucian",cost:3,hp:720,ad:55,traits:["Thời Không"]},{id:37,name:"Ezreal",cost:4,hp:880,ad:77,traits:["Thời Không"]},{id:38,name:"Bard",cost:5,hp:1050,ad:90,traits:["Thời Không"]},
+            {id:39,name:"Kindred",cost:6,hp:2500,ad:200,traits:["Đấng Sáng Thế"]},{id:40,name:"Pyke",cost:6,hp:3000,ad:180,traits:["Kẻ Hủy Diệt"]},{id:41,name:"Soraka",cost:6,hp:4000,ad:100,traits:["Vệ Binh Tinh Tú"]} ];
+        const shopOddsByLevel = { 1:{1:100,2:0,3:0,4:0,5:0,6:0},2:{1:100,2:0,3:0,4:0,5:0,6:0},3:{1:75,2:25,3:0,4:0,5:0,6:0},4:{1:55,2:30,3:15,4:0,5:0,6:0},5:{1:45,2:33,3:20,4:2,5:0,6:0},6:{1:25,2:40,3:30,4:5,5:0,6:0},7:{1:19,2:30,3:35,4:15,5:1,6:0},8:{1:16,2:20,3:35,4:25,5:4,6:0},9:{1:9,2:15,3:30,4:30,5:16,6:0},10:{1:5,2:10,3:20,4:40,5:25,6:0}, 11: {1:1, 2:2, 3:7, 4:30, 5:60, 6:0}, 12:{1:0, 2:0, 3:0, 4:0, 5:100, 6:0}, 13:{1:0, 2:0, 3:0, 4:0, 5:85, 6:15} };
+        const xpToNextLevel = [0, 2, 2, 6, 10, 20, 36, 48, 76, 84, 99, 99, 99];
+
+        let state;
+        let draggedGhost = null;
+        let dragOffsetX = 0, dragOffsetY = 0;
+        let lastBattleResult = { isVictory: false, hpLoss: 0 };
+        
+        function getInitialState() {
+            return { gold: 50, level: 3, xp: 4, board: Array(14).fill(null), bench: Array(9).fill(null), shop: Array(5).fill(null), hoveredChampionInstanceId: null, draggedChampion: null, littleLegendHp: 100, currentRound: 1, enemyCombatPower: 10000, goldReward: 10, level11Unlocked: false, level12Unlocked: false, level13Unlocked: false };
+        }
+        state = getInitialState();
+        let instanceCounter = 0;
+
+        function initializeGame() {
+            document.getElementById('board').innerHTML = Array(14).fill(0).map((_, i) => `<div class="board-slot rounded-md" data-index="${i}"></div>`).join('');
+            document.getElementById('bench').innerHTML = Array(9).fill(0).map((_, i) => `<div class="bench-slot rounded-md" data-index="${i}"></div>`).join('');
+            bindEventListeners(); 
+            updateAllUI(); 
+            rollShop(true);
+        }
+
+        function updateAllUI() { updateStatsUI(); renderShop(); renderBoardAndBench(); updateBoardStats(); }
+        
+        function updateStatsUI() { 
+            document.getElementById('gold-display').textContent = state.gold; 
+            document.getElementById('level-display').textContent = state.level;
+            document.getElementById('player-hp-display').textContent = state.littleLegendHp;
+            let maxLevel = 10;
+            if(state.level13Unlocked) maxLevel = 13; else if (state.level12Unlocked) maxLevel = 12; else if (state.level11Unlocked) maxLevel = 11;
+
+            const xpNeeded = xpToNextLevel[state.level] || 0; const xpBar = document.getElementById('xp-bar'); const xpText = document.getElementById('xp-display'); const buyXpButton = document.getElementById('buy-xp-button');
+            if (state.level >= maxLevel) { 
+                xpBar.style.width = '100%'; 
+                xpText.textContent = "Cấp Tối Đa"; 
+                buyXpButton.disabled = true; 
+                buyXpButton.classList.add('opacity-50', 'cursor-not-allowed'); 
+            } else { 
+                xpBar.style.width = `${(state.xp / xpNeeded) * 100}%`; 
+                xpText.textContent = `${state.xp} / ${xpNeeded} XP`; 
+                buyXpButton.disabled = false; 
+                buyXpButton.classList.remove('opacity-50', 'cursor-not-allowed'); 
+            }
+            const oddsContainer = document.getElementById('shop-odds');
+            if (oddsContainer) {
+                let currentOdds = shopOddsByLevel[state.level] || shopOddsByLevel[10];
+                let html = '<div class="grid grid-cols-6 gap-1 text-center">';
+                for (let cost = 1; cost <= 6; cost++) {
+                    const percentage = currentOdds[cost] === undefined ? 0 : currentOdds[cost];
+                    if (cost === 6 && !state.level13Unlocked) continue;
+                    const colorClass = `cost-bar-${cost}`;
+                    html += `<div class="p-1 rounded text-white text-xs ${colorClass}"><span>${cost}💰</span> <span class="font-semibold">${percentage}%</span></div>`;
+                }
+                html += '</div>'; oddsContainer.innerHTML = html;
+            }
+        }
+
+        function getChampionFinalStats(championInstance) {
+            const baseChamp = championsData.find(c => c.id === championInstance.id);
+            if (!baseChamp) return { finalHp: 0, finalAd: 0 };
+            let hp = baseChamp.hp; let ad = baseChamp.ad; let adBuffPercent = championInstance.adBuffPercent || 0;
+            if (championInstance.starLevel >= 4) { hp *= Math.pow(10, championInstance.starLevel - 3); ad *= Math.pow(10, championInstance.starLevel - 3); }
+            else if (championInstance.starLevel > 1) {
+                hp = Math.round(baseChamp.hp * Math.pow(1.8, championInstance.starLevel - 1));
+                ad = Math.round(baseChamp.ad * Math.pow(1.5, championInstance.starLevel - 1));
+                if (championInstance.starLevel === 2) { if (baseChamp.cost === 4) { hp *= 1.4; ad *= 1.4; } if (baseChamp.cost === 5) { hp *= 1.5; ad *= 1.5; } } 
+                else if (championInstance.starLevel === 3) { if (baseChamp.cost === 3) { hp *= 1.3; ad *= 1.3; } if (baseChamp.cost === 4) { hp += 20000; ad += 8000; } if (baseChamp.cost === 5) { hp += 200000; ad += 20000; } }
+            }
+            ad *= (1 + adBuffPercent);
+            return { finalHp: Math.round(hp), finalAd: Math.round(ad) };
+        }
+
+        function createChampionElement(championInstance) {
+            if (!championInstance) return '';
+            const baseChamp = championsData.find(c => c.id === championInstance.id);
+            let starsDisplay = championInstance.starLevel > 3 ? `<span class="font-bold text-xl">★ ${championInstance.starLevel}</span>` : '★'.repeat(championInstance.starLevel);
+            const { finalHp, finalAd } = getChampionFinalStats(championInstance);
+            const heartIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-red-500 mr-1"><path d="M12 4.248c-3.148-5.402-12-3.825-12 2.942 0 4.661 5.571 9.427 12 15.81 6.43-6.383 12-11.149 12-15.81 0-6.792-8.875-8.306-12-2.942z"/></svg>`;
+            const swordIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-orange-400 mr-1"><path d="M19.724 5.474l-4.197-4.197-2.527 2.527-2.121-2.121-2.828 2.828 2.121 2.121-2.020 2.020-2.828 2.828 2.020 2.020-2.121 2.121 2.828 2.828 2.121-2.121 2.527 2.527 4.197-4.197-10.58-10.58z"/></svg>`;
+            let traitsHtml = baseChamp.traits.map(t => `<div class="flex items-center space-x-1 bg-black bg-opacity-50 px-1 py-0.5 rounded">${traitData[t]?.icon || ''} <span class="text-xs">${t}</span></div>`).join('');
+            return `<div id="instance-${championInstance.instanceId}" class="champion-card rounded-md text-white h-full star-${championInstance.starLevel}" draggable="true" data-instance-id="${championInstance.instanceId}"><div class="champion-stars text-yellow-400 text-lg">${starsDisplay}</div><div class="champion-traits-list">${traitsHtml}</div><div class="champion-art"></div><div class="champion-stats"><span class="flex items-center">${heartIcon} ${finalHp}</span><span class="flex items-center">${swordIcon} ${finalAd}</span></div><div class="champion-info-bar cost-bar-${baseChamp.cost}"><div class="flex justify-center items-center"><span class="font-bold text-sm truncate">${baseChamp.name}</span></div></div></div>`;
+        }
+        
+        function renderShop() {
+            const shopContainer = document.getElementById('shop'); let html = '';
+            state.shop.forEach((championId, index) => {
+                let innerHtml = ''; const hotkeyIndicator = `<div class="absolute top-1 left-1 bg-gray-900 bg-opacity-60 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold text-gray-300">${index + 1}</div>`;
+                if (championId) {
+                    const baseChamp = championsData.find(c => c.id === championId);
+                    const heartIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-red-500 mr-1"><path d="M12 4.248c-3.148-5.402-12-3.825-12 2.942 0 4.661 5.571 9.427 12 15.81 6.43-6.383 12-11.149 12-15.81 0-6.792-8.875-8.306-12-2.942z"/></svg>`;
+                    const swordIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-orange-400 mr-1"><path d="M19.724 5.474l-4.197-4.197-2.527 2.527-2.121-2.121-2.828 2.828 2.121 2.121-2.020 2.020-2.828 2.828 2.020 2.020-2.121 2.121 2.828 2.828 2.121-2.121 2.527 2.527 4.197-4.197-10.58-10.58z"/></svg>`;
+                    let traitsHtml = baseChamp.traits.map(t => `<div class="flex items-center space-x-1 bg-black bg-opacity-50 px-1 py-0.5 rounded">${traitData[t]?.icon || ''} <span class="text-xs">${t}</span></div>`).join('');
+                    innerHtml = `<div class="champion-card rounded-md text-white h-full star-1 cursor-pointer" data-shop-index="${index}">${hotkeyIndicator}<div class="champion-stars text-yellow-400 text-lg">★</div><div class="champion-traits-list">${traitsHtml}</div><div class="champion-art"></div><div class="champion-stats"><span class="flex items-center">${heartIcon} ${baseChamp.hp}</span><span class="flex items-center">${swordIcon} ${baseChamp.ad}</span></div><div class="champion-info-bar cost-bar-${baseChamp.cost}"><div class="flex justify-between items-center"><span class="font-bold text-sm truncate">${baseChamp.name}</span><span class="flex items-center text-sm font-semibold">${baseChamp.cost}💰</span></div></div></div>`;
+                } else { innerHtml = hotkeyIndicator; }
+                html += `<div class="shop-slot rounded-lg p-1">${innerHtml}</div>`;
+            });
+            shopContainer.innerHTML = html;
+            shopContainer.querySelectorAll('.champion-card').forEach(el => el.addEventListener('click', (e) => buyChampion(parseInt(e.currentTarget.dataset.shopIndex, 10))));
+        }
+        
+        function renderBoardAndBench() {
+            ['board', 'bench'].forEach(area => { const container = document.getElementById(area); state[area].forEach((championInstance, index) => { const slot = container.querySelector(`[data-index="${index}"]`); if(slot) slot.innerHTML = createChampionElement(championInstance); }); });
+            addChampionEventListeners();
+        }
+
+        function getTraitCounts() {
+            const traitChampionSets = {};
+            state.board.forEach(champInstance => {
+                if (champInstance) {
+                    const baseChamp = championsData.find(c => c.id === champInstance.id);
+                    baseChamp.traits.forEach(trait => {
+                        if (!traitChampionSets[trait]) { traitChampionSets[trait] = new Set(); }
+                        traitChampionSets[trait].add(baseChamp.id);
+                    });
+                }
+            });
+            const counts = {};
+            for (const trait in traitChampionSets) { counts[trait] = traitChampionSets[trait].size; }
+            return counts;
+        }
+
+        function calculateCombatPower() {
+            let totalHp = 0, totalAd = 0, traitPower = 0;
+            state.board.forEach(champInstance => {
+                if (champInstance) { const { finalHp, finalAd } = getChampionFinalStats(champInstance); totalHp += finalHp; totalAd += finalAd; }
+            });
+            const counts = getTraitCounts();
+            Object.entries(counts).forEach(([traitName, count]) => {
+                const traitInfo = traitData[traitName];
+                if (traitInfo) {
+                    let activeTier = 0; for (const threshold of traitInfo.thresholds) { if (count >= threshold) activeTier = threshold; }
+                    if (activeTier > 0) {
+                        if (traitName === "Chiến Binh") { const powerMap = { 3: 20000, 5: 250000, 7: 1000000 }; traitPower += powerMap[activeTier] || 0; } 
+                        else { traitPower += Math.pow(activeTier, 7); }
+                    }
+                }
+            });
+            return (totalAd * 30) + (totalHp * 2) + traitPower;
+        }
+
+        function updateBoardStats() {
+            const tracker = document.getElementById('trait-tracker');
+            const cpDisplay = document.getElementById('combat-power-display');
+            const boardUnitCountDisplay = document.getElementById('board-unit-count');
+            const currentUnits = state.board.filter(c => c !== null).length;
+            
+            boardUnitCountDisplay.textContent = `(${currentUnits}/${state.level})`;
+            if (currentUnits > state.level) { boardUnitCountDisplay.classList.add('text-red-500'); boardUnitCountDisplay.classList.remove('text-gray-400'); } 
+            else { boardUnitCountDisplay.classList.remove('text-red-500'); boardUnitCountDisplay.classList.add('text-gray-400'); }
+
+            const counts = getTraitCounts();
+            cpDisplay.textContent = calculateCombatPower().toLocaleString('vi-VN');
+            const sortedTraits = Object.entries(counts).sort((a, b) => b[1] - a[1]); let html = '';
+            sortedTraits.forEach(([traitName, count]) => {
+                const traitInfo = traitData[traitName];
+                if (traitInfo) { let activeTier = 0; for (const threshold of traitInfo.thresholds) { if (count >= threshold) activeTier = threshold; }
+                    html += `<div class="trait-item flex items-center space-x-2 p-1 rounded cursor-pointer hover:bg-gray-700 ${activeTier > 0 ? 'bg-gray-800' : ''}" data-trait-name="${traitName}">
+                                <div class="w-6 h-6 flex items-center justify-center">${traitInfo.icon}</div>
+                                <span class="font-semibold ${activeTier > 0 ? 'text-white' : 'text-gray-500'}">${traitName}</span>
+                                <span class="font-bold ${activeTier > 0 ? 'text-amber-400' : 'text-gray-500'}">${count}</span>
+                             </div>`;
+                }
+            });
+            tracker.innerHTML = html;
+            document.querySelectorAll('.trait-item').forEach(el => el.addEventListener('click', () => showTraitInfoModal(el.dataset.traitName)));
+        }
+        
+        function checkAndUnlockLevels() {
+            if (!state.level11Unlocked) {
+                 const has5Cost3Star = [...state.board, ...state.bench].some(c => c && championsData.find(b=>b.id===c.id)?.cost === 5 && c.starLevel >= 3);
+                 if(has5Cost3Star) { state.level11Unlocked = true; showNotification("Đã mở khóa Cấp 11!"); }
+            }
+            if (state.level11Unlocked && !state.level12Unlocked) {
+                 const has5Cost4Star = [...state.board, ...state.bench].some(c => c && championsData.find(b=>b.id===c.id)?.cost === 5 && c.starLevel >= 4);
+                 if(has5Cost4Star) { state.level12Unlocked = true; showNotification("Sức mạnh tối thượng! Đã mở khóa Cấp 12 (100% tướng 5 vàng)!"); }
+            }
+            if (state.level12Unlocked && !state.level13Unlocked) {
+                 const has5Cost5Star = [...state.board, ...state.bench].some(c => c && championsData.find(b=>b.id===c.id)?.cost === 5 && c.starLevel >= 5);
+                 if(has5Cost5Star) { state.level13Unlocked = true; showNotification("Vượt qua giới hạn! Đã mở khóa Cấp 13 (Cơ hội tướng 6 vàng)!"); }
+            }
+            updateAllUI();
+        }
+
+        function checkLevelUp() { 
+            let maxLevel = 10;
+            if(state.level13Unlocked) maxLevel = 13; else if (state.level12Unlocked) maxLevel = 12; else if (state.level11Unlocked) maxLevel = 11;
+            while (state.level < maxLevel && state.xp >= xpToNextLevel[state.level]) { state.xp -= xpToNextLevel[state.level]; state.level++; } 
+        }
+        function buyXp() { 
+            let maxLevel = 10;
+            if(state.level13Unlocked) maxLevel = 13; else if (state.level12Unlocked) maxLevel = 12; else if (state.level11Unlocked) maxLevel = 11;
+            if (state.gold >= 4 && state.level < maxLevel) { state.gold -= 4; state.xp += 4; checkLevelUp(); updateAllUI(); } 
+        }
+        function rollShop(isFree=false){if(!isFree){if(state.gold<2)return;state.gold-=2;playRollSound()}state.shop=Array(5).fill(null).map(()=>{const c=pickCostByOdds();return pickChampionFromCost(c)});updateAllUI()}
+        function pickCostByOdds(){let o=shopOddsByLevel[state.level]||shopOddsByLevel[10];const r=Math.random()*100;let c=0;for(const s in o){c+=o[s];if(r<c)return parseInt(s,10)}return 1}
+        function pickChampionFromCost(c){const a=championsData.filter(h=>h.cost===c);if(a.length===0)return null;const i=a[Math.floor(Math.random()*a.length)];return i.id}
+        function buyChampion(s){if(s<0||s>4)return;const c=state.shop[s];if(!c)return;const b=championsData.find(h=>h.id===c);if(state.gold<b.cost)return;const e=state.bench.findIndex(l=>l===null);if(e===-1)return;playBuySound();state.gold-=b.cost;state.shop[s]=null;state.bench[e]={instanceId:instanceCounter++,id:c,starLevel:1, adBuffPercent: 0};checkForUpgrades(b.id);updateAllUI()}
+        function sellChampion(i){if(i===null)return;let f=!1;['board','bench'].forEach(a=>{const n=state[a].findIndex(c=>c&&c.instanceId===i);if(n!==-1){const o=state[a][n];state.gold+=championsData.find(p=>p.id===o.id).cost*Math.pow(3,o.starLevel-1);state[a][n]=null;f=!0}});if(f){state.hoveredChampionInstanceId=null;updateAllUI()}}
+        function checkForUpgrades(c){let u=!0;while(u){u=!1;for(let s=1;s<10;s++){const a=[...state.board,...state.bench],m=a.filter(h=>h&&h.id===c&&h.starLevel===s);if(m.length>=3){playUpgradeSound();u=!0;const t=m.slice(0,3);let l={area:'bench',index:-1};t.forEach(o=>{['board','bench'].forEach(a=>{const n=state[a].findIndex(p=>p&&p.instanceId===o.instanceId);if(n!==-1){state[a][n]=null;l={area:a,index:n}}})});const g={instanceId:instanceCounter++,id:c,starLevel:s+1, adBuffPercent: 0};if(l.index!==-1&&state[l.area][l.index]===null){state[l.area][l.index]=g}else{const e=state.bench.findIndex(n=>n===null);if(e!==-1){state.bench[e]=g}else{console.error("No space!");break}} checkAndUnlockLevels(); break;}}}}
+
+        const battleModal = document.getElementById('battle-modal'); const gameOverModal = document.getElementById('game-over-modal'); const battleResultModal = document.getElementById('battle-result-modal');
+        function startBattle() {
+            let playerPower = calculateCombatPower();
+            let winRateBonus = 0;
+            const counts = getTraitCounts();
+            if (counts["Thần Giáp"]) { const tierMap = { 3: 0.03, 5: 0.10, 7: 0.17 }; let activeTier = 0; for (const threshold of traitData["Thần Giáp"].thresholds) { if (counts["Thần Giáp"] >= threshold) activeTier = threshold; } winRateBonus = tierMap[activeTier] || 0; }
+            let winRate = (playerPower / (playerPower + state.enemyCombatPower)) + winRateBonus; winRate = Math.min(1, winRate);
+            document.getElementById('round-number-display').textContent = state.currentRound;
+            document.getElementById('enemy-power-display').textContent = state.enemyCombatPower.toLocaleString('vi-VN');
+            document.getElementById('win-rate-display').textContent = `${(winRate * 100).toFixed(2)}%`;
+            battleModal.classList.remove('hidden');
+        }
+        function confirmBattle() {
+            let playerPower = calculateCombatPower(); let winRateBonus = 0; const counts = getTraitCounts();
+            if (counts["Thần Giáp"]) { const tierMap = { 3: 0.03, 5: 0.10, 7: 0.17 }; let activeTier = 0; for (const threshold of traitData["Thần Giáp"].thresholds) { if (counts["Thần Giáp"] >= threshold) activeTier = threshold; } winRateBonus = tierMap[activeTier] || 0; }
+            let winRate = (playerPower / (playerPower + state.enemyCombatPower)) + winRateBonus; winRate = Math.min(1, winRate);
+            const isVictory = Math.random() < winRate;
+            let hpLoss = 0;
+            if (!isVictory) {
+                if (state.currentRound <= 10) hpLoss = Math.floor(Math.random() * 5) + 1;
+                else if (state.currentRound <= 20) hpLoss = Math.floor(Math.random() * 5) + 3;
+                else if (state.currentRound <= 30) hpLoss = Math.floor(Math.random() * 5) + 4;
+                else if (state.currentRound <= 40) hpLoss = Math.floor(Math.random() * 6) + 5;
+                else hpLoss = Math.floor(Math.random() * 11) + 10;
+            }
+            lastBattleResult = { isVictory: isVictory, hpLoss: hpLoss };
+            battleModal.classList.add('hidden'); 
+            const resultTitle = document.getElementById('battle-result-title');
+            const resultMessage = document.getElementById('battle-result-message');
+            if (isVictory) { resultTitle.textContent = "CHIẾN THẮNG"; resultTitle.className = "text-4xl font-bold mb-4 text-green-400"; resultMessage.textContent = `Bạn nhận được ${state.goldReward} vàng!`; } 
+            else { resultTitle.textContent = "THẤT BẠI"; resultTitle.className = "text-4xl font-bold mb-4 text-red-500"; resultMessage.textContent = `Bạn bị trừ ${hpLoss} máu!`; }
+            battleResultModal.classList.remove('hidden');
+        }
+
+        function proceedAfterBattle() {
+            battleResultModal.classList.add('hidden');
+            if (lastBattleResult.isVictory) { state.gold += state.goldReward; state.goldReward += 1; state.enemyCombatPower = Math.round(state.enemyCombatPower * 1.2); state.currentRound++; } 
+            else { state.littleLegendHp -= lastBattleResult.hpLoss; }
+            handlePostBattleEvents(lastBattleResult.isVictory); 
+            if (state.littleLegendHp <= 0) { state.littleLegendHp = 0; updateAllUI(); gameOver(); } 
+            else { 
+                state.xp += 2;
+                checkLevelUp();
+                rollShop();
+            }
+        }
+        
+        function showNotification(message) { const notification = document.getElementById('event-notification'); const messageEl = document.getElementById('event-message'); messageEl.textContent = message; notification.classList.remove('hidden', 'opacity-0', '-translate-y-10'); notification.classList.add('opacity-100', 'translate-y-0'); setTimeout(() => { notification.classList.remove('opacity-100', 'translate-y-0'); notification.classList.add('opacity-0', '-translate-y-10'); setTimeout(() => notification.classList.add('hidden'), 500); }, 3000); }
+        function handlePostBattleEvents(isVictory) {
+            const counts = getTraitCounts();
+            if (isVictory && counts["Thiên Tử"]) {
+                const tierMap = { 3: {xp:2, cost:[3], ad:0.1}, 4: {xp:6, cost:[4], ad:0.2}, 5: {xp:15, cost:[5], ad:0.4}, 7: {xp:20, cost:[5,5,5], ad:0.5} };
+                let activeTier = 0; for (const threshold of traitData["Thiên Tử"].thresholds) { if(counts["Thiên Tử"] >= threshold) activeTier = threshold; }
+                if(tierMap[activeTier]) {
+                    const rand = Math.random() * 12;
+                    if (rand < 5) {
+                        const thienTuOnBoard = state.board.filter(c => c && championsData.find(b => b.id === c.id).traits.includes("Thiên Tử"));
+                        if (thienTuOnBoard.length > 0) { const randomChamp = thienTuOnBoard[Math.floor(Math.random() * thienTuOnBoard.length)]; randomChamp.adBuffPercent += tierMap[activeTier].ad; showNotification(`Thiên Tử ban phước! ${championsData.find(c=>c.id === randomChamp.id).name} nhận thêm ${tierMap[activeTier].ad * 100}% Sát thương!`); }
+                    } else if (rand < 10) { tierMap[activeTier].cost.forEach(c => giveRandomChampion([c]));
+                    } else if (rand < 12) { state.xp += tierMap[activeTier].xp; checkLevelUp(); showNotification(`Thiên Tử ban phước! Bạn nhận được ${tierMap[activeTier].xp} XP!`); }
+                }
+            }
+            if (!isVictory && counts["Thần Tài"] && Math.random() < 0.5) { const tierMap = { 3: 5, 4: 10, 5: 20 }; let activeTier = 0; for (const threshold of traitData["Thần Tài"].thresholds) { if (counts["Thần Tài"] >= threshold) activeTier = threshold; } if(tierMap[activeTier]){ state.gold += tierMap[activeTier]; showNotification(`Thần Tài phù hộ! Bạn nhận được ${tierMap[activeTier]} vàng sau chuỗi thua!`); } }
+            
+            if (counts["Hắc Ám"] && Math.random() < 0.2) { 
+                const tierMap = { 3: 3, 4: 5, 5: 15 }; let activeTier = 0; for (const threshold of traitData["Hắc Ám"].thresholds) { if (counts["Hắc Ám"] >= threshold) activeTier = threshold; } 
+                if(tierMap[activeTier]){ state.littleLegendHp = Math.min(100, state.littleLegendHp + tierMap[activeTier]); showNotification(`Hắc Ám kích hoạt! Bạn được hồi ${tierMap[activeTier]} máu.`); } 
+            }
+            if (counts["Thời Không"] && Math.random() < 0.15){
+                const tierMap = { 3: 3, 4: 4, 5: 5 };
+                let activeTier = 0; for (const threshold of traitData["Thời Không"].thresholds) { if (counts["Thời Không"] >= threshold) activeTier = threshold; }
+                if(tierMap[activeTier]) {
+                    const thoiKhongChamps = championsData.filter(c => c.traits.includes("Thời Không") && c.cost === tierMap[activeTier]).map(c => c.id);
+                    giveRandomChampion(thoiKhongChamps, true);
+                }
+            }
+            const randNegative = Math.random() * 100;
+            if (randNegative < 2) { const goldLost = Math.floor(state.gold * 0.8); state.gold -= goldLost; showNotification(`Hiệu ứng bất lợi! Bạn bị mất ${goldLost} vàng!`); } 
+            else if (randNegative < 5) {
+                const unitsOnBoard = state.board.map((c, i) => c ? i : -1).filter(i => i !== -1);
+                if (unitsOnBoard.length > 0) {
+                    const randomIndex = unitsOnBoard[Math.floor(Math.random() * unitsOnBoard.length)]; const lostChamp = state.board[randomIndex];
+                    const baseChamp = championsData.find(c => c.id === lostChamp.id); state.board[randomIndex] = null;
+                    showNotification(`Hiệu ứng bất lợi! Tướng ${baseChamp.name} của bạn đã bị loại khỏi sân đấu!`);
+                }
+            } else if (randNegative < 8) { state.littleLegendHp -= 10; showNotification(`Hiệu ứng bất lợi! Bạn mất 10 máu!`); }
+        }
+
+        function giveRandomChampion(options, byId = false) {
+            let potentialChamps;
+            if (byId) { potentialChamps = championsData.filter(c => options.includes(c.id)); } 
+            else { potentialChamps = championsData.filter(c => options.includes(c.cost)); }
+            if(potentialChamps.length === 0) return;
+            const champ = potentialChamps[Math.floor(Math.random() * potentialChamps.length)];
+            const emptyBenchSlotIndex = state.bench.findIndex(s => s === null);
+            if (emptyBenchSlotIndex === -1) { state.gold += champ.cost; showNotification(`Hàng chờ đầy! Tướng ${champ.name} được bán với giá ${champ.cost} vàng.`); return; }
+            state.bench[emptyBenchSlotIndex] = {instanceId: instanceCounter++, id: champ.id, starLevel: 1, adBuffPercent: 0};
+            checkForUpgrades(champ.id);
+        }
+
+        const traitModal = document.getElementById('trait-info-modal');
+        function showTraitInfoModal(traitName) {
+            const trait = traitData[traitName]; const content = document.getElementById('trait-info-content');
+            let effectsHtml = '<ul class="space-y-2 text-left">';
+            Object.entries(trait.effects).forEach(([threshold, effect]) => { effectsHtml += `<li class="flex items-start"><span class="font-bold text-amber-400 w-8">${threshold}</span><span>${effect}</span></li>`; });
+            effectsHtml += '</ul>';
+            let championsHtml = '<div class="mt-4 pt-4 border-t border-gray-600"><h4 class="font-bold mb-2">Các tướng:</h4><div class="flex flex-wrap gap-2">';
+            championsData.filter(c => c.traits.includes(traitName)).forEach(c => {
+                championsHtml += `<span class="cost-text-${c.cost} font-semibold">${c.name}</span>`;
+            });
+            championsHtml += '</div></div>';
+
+            content.innerHTML = `<div class="flex items-center mb-4"><div class="w-10 h-10 mr-4 flex-shrink-0">${trait.icon}</div><h2 class="text-2xl font-bold">${traitName}</h2></div><p class="mb-4 text-gray-400">${trait.description}</p>${effectsHtml}${championsHtml}<button id="close-trait-modal-button" class="mt-6 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded w-full">Đóng</button>`;
+            traitModal.classList.remove('hidden'); document.getElementById('close-trait-modal-button').addEventListener('click', () => traitModal.classList.add('hidden'));
+        }
+
+        function gameOver() { document.getElementById('final-round-display').textContent = state.currentRound; gameOverModal.classList.remove('hidden'); }
+        function restartGame() { state = getInitialState(); instanceCounter = 0; initializeGame(); }
+        
+        function handleDragStart(e) {
+            const target = e.target.closest('.champion-card'); if (!target) return;
+            const instanceId = parseInt(target.dataset.instanceId, 10); let sourceArea, sourceIndex;
+            sourceIndex = state.board.findIndex(c => c && c.instanceId === instanceId); if (sourceIndex !== -1) { sourceArea = 'board'; } else { sourceIndex = state.bench.findIndex(c => c && c.instanceId === instanceId); sourceArea = 'bench'; }
+            if (sourceArea === undefined) return; state.draggedChampion = { instance: state[sourceArea][sourceIndex], sourceArea: sourceArea, sourceIndex: sourceIndex };
+            setTimeout(() => { target.style.opacity = '0.5'; }, 0);
+        }
+        function handleTouchStart(e) {
+            const target = e.target.closest('.champion-card'); if (!target) return;
+            const instanceId = parseInt(target.dataset.instanceId, 10); let sourceArea, sourceIndex;
+            sourceIndex = state.board.findIndex(c => c && c.instanceId === instanceId); if (sourceIndex !== -1) { sourceArea = 'board'; } else { sourceIndex = state.bench.findIndex(c => c && c.instanceId === instanceId); sourceArea = 'bench'; }
+            if (sourceArea === undefined) return; state.draggedChampion = { instance: state[sourceArea][sourceIndex], sourceArea: sourceArea, sourceIndex: sourceIndex };
+            const rect = target.getBoundingClientRect(); draggedGhost = target.cloneNode(true); draggedGhost.classList.add('dragging-ghost'); document.body.appendChild(draggedGhost);
+            const touch = e.touches[0]; dragOffsetX = touch.clientX - rect.left; dragOffsetY = touch.clientY - rect.top;
+            draggedGhost.style.width = `${rect.width}px`; draggedGhost.style.height = `${rect.height}px`; draggedGhost.style.left = `${touch.clientX - dragOffsetX}px`; draggedGhost.style.top = `${touch.clientY - dragOffsetY}px`;
+            target.style.opacity = '0.5';
+        }
+        function handleTouchMove(e) {
+            if (!draggedGhost || !state.draggedChampion) return; e.preventDefault();
+            const touch = e.touches[0]; draggedGhost.style.left = `${touch.clientX - dragOffsetX}px`; draggedGhost.style.top = `${touch.clientY - dragOffsetY}px`;
+            const sellArea = document.getElementById('sell-area'); const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+            if(targetElement && (targetElement === sellArea || sellArea.contains(targetElement))) { sellArea.classList.add('drag-over-sell'); } else { sellArea.classList.remove('drag-over-sell'); }
+        }
+        function handleTouchEnd(e) {
+            if (!draggedGhost || !state.draggedChampion) return;
+            const touch = e.changedTouches[0]; const dropTarget = document.elementFromPoint(touch.clientX, touch.clientY);
+            performDrop(dropTarget);
+            if (draggedGhost && draggedGhost.parentNode) { document.body.removeChild(draggedGhost); }
+            draggedGhost = null;
+            renderBoardAndBench();
+        }
+        function handleDragOver(e) {
+            e.preventDefault(); const sellArea = document.getElementById('sell-area'); const targetElement = e.target;
+            if (targetElement === sellArea || sellArea.contains(targetElement)) { sellArea.classList.add('drag-over-sell'); } 
+            else { sellArea.classList.remove('drag-over-sell'); }
+        }
+        function handleDrop(e) { e.preventDefault(); document.getElementById('sell-area').classList.remove('drag-over-sell'); performDrop(e.target); }
+        function performDrop(dropTarget) {
+            const sellArea = dropTarget.closest('#sell-area');
+            if (sellArea && state.draggedChampion) { sellChampion(state.draggedChampion.instance.instanceId); } 
+            else {
+                const t=dropTarget.closest('.board-slot, .bench-slot'); 
+                if(!t||!state.draggedChampion) { state.draggedChampion = null; renderBoardAndBench(); return; }
+                const targetArea=t.parentElement.id.includes('board')?'board':'bench', {sourceArea, sourceIndex} = state.draggedChampion;
+                const currentUnitsOnBoard = state.board.filter(c => c !== null).length;
+                if (targetArea === 'board' && sourceArea !== 'board' && currentUnitsOnBoard >= state.level) { state.draggedChampion = null; renderBoardAndBench(); return; }
+                const targetIndex=parseInt(t.dataset.index,10),{instance}=state.draggedChampion;
+                state[sourceArea][sourceIndex]=null;
+                const c=state[targetArea][targetIndex];
+                if(c)state[sourceArea][sourceIndex]=c;
+                state[targetArea][targetIndex]=instance;
+            }
+            state.draggedChampion = null;
+            updateAllUI();
+        }
+        
+        function moveAllBenchToBoard() {
+            let unitsOnBoard = state.board.filter(c => c !== null).length;
+            for (let i = 0; i < state.bench.length; i++) {
+                if (unitsOnBoard >= state.level) break;
+                if (state.bench[i]) {
+                    const emptyBoardSlot = state.board.findIndex(s => s === null);
+                    if (emptyBoardSlot !== -1) {
+                        state.board[emptyBoardSlot] = state.bench[i];
+                        state.bench[i] = null;
+                        unitsOnBoard++;
+                    }
+                }
+            }
+            updateAllUI();
+        }
+
+        function toggleFullScreen() {
+            try {
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen();
+                } else {
+                    if (document.exitFullscreen) {
+                        document.exitFullscreen();
+                    }
+                }
+            } catch (err) {
+                console.error(`Lỗi bật chế độ toàn màn hình: ${err.message} (${err.name})`);
+                showNotification("Trình duyệt của bạn không hỗ trợ hoặc không cho phép chế độ toàn màn hình.");
+            }
+        }
+        
+        function bindEventListeners(){
+            document.getElementById('buy-xp-button').addEventListener('click', buyXp); 
+            document.getElementById('roll-button').addEventListener('click',()=>rollShop()); 
+            document.getElementById('start-battle-button').addEventListener('click', startBattle);
+            document.getElementById('confirm-battle-button').addEventListener('click', confirmBattle);
+            document.getElementById('close-battle-modal-button').addEventListener('click', () => battleModal.classList.add('hidden'));
+            document.getElementById('restart-button').addEventListener('click', restartGame);
+            document.getElementById('continue-button').addEventListener('click', proceedAfterBattle);
+            document.getElementById('help-button').addEventListener('click', () => document.getElementById('help-modal').classList.remove('hidden'));
+            document.getElementById('close-help-modal-button').addEventListener('click', () => document.getElementById('help-modal').classList.add('hidden'));
+            document.getElementById('settings-button').addEventListener('click', () => document.getElementById('settings-modal').classList.remove('hidden'));
+            document.getElementById('close-settings-button').addEventListener('click', () => document.getElementById('settings-modal').classList.add('hidden'));
+            document.getElementById('volume-slider').addEventListener('input', (e) => {
+                const volume = parseFloat(e.target.value);
+                try {
+                     if (window.Tone) {
+                        Tone.getDestination().volume.value = Tone.gainToDb(volume);
+                    }
+                } catch(e) {}
+            });
+            
+            traitModal.addEventListener('click', (e) => { if (e.target === traitModal) { traitModal.classList.add('hidden'); }});
+            document.addEventListener('keydown',e=>{ 
+                if(document.activeElement.tagName==='INPUT')return; 
+                const k=e.key.toLowerCase(); 
+                if(k==='d'){rollShop()} 
+                else if (k === 'f') { buyXp(); } 
+                else if (k === 'i') { moveAllBenchToBoard(); }
+                else if(k==='e'&&state.hoveredChampionInstanceId!==null){sellChampion(state.hoveredChampionInstanceId)} 
+                else if(['1','2','3','4','5'].includes(k)){buyChampion(parseInt(k,10)-1)} 
+            });
+            const g=document.querySelector('body'); 
+            g.addEventListener('dragover',handleDragOver); 
+            g.addEventListener('drop',handleDrop);
+        }
+        function addChampionEventListeners(){
+            document.querySelectorAll('.champion-card').forEach(e=>{
+                const i=parseInt(e.dataset.instanceId,10);
+                e.addEventListener('mouseenter',()=>{state.hoveredChampionInstanceId=i});
+                e.addEventListener('mouseleave',()=>{state.hoveredChampionInstanceId=null});
+                e.addEventListener('dragstart',handleDragStart);
+                e.addEventListener('touchstart', handleTouchStart, {passive: false});
+            });
+            document.body.addEventListener('touchmove', handleTouchMove, {passive: false});
+            document.body.addEventListener('touchend', handleTouchEnd);
+        }
+        
+        initializeGame();
+    });
+</script>
+
+</body>
+</html>
